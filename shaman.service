@@ -1,0 +1,16 @@
+[Unit]
+Description=Shaman
+After=syslog.target network.target
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/path/to/bot/
+ExecStart=/path/to/virtualenv/bin/python /path/to/bot.py
+Environment=SHAMAN_SITEURL=
+Environment=SHAMAN_PASSWORD=
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

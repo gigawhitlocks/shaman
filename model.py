@@ -119,6 +119,8 @@ class Model():
                 sample = weighted_pick(p)
 
             pred = chars[sample]
+            if pred == "\n":
+                return ret
             ret += pred
             char = pred
         return ret
