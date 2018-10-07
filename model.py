@@ -97,7 +97,7 @@ class Model():
         def weighted_pick(weights):
             t = np.cumsum(weights)
             s = np.sum(weights)
-            return(int(np.searchsorted(t, np.random.rand(1)*s)))
+            return(int(np.searchsorted(t, (np.random.rand(1)*s))))
 
         ret = prime
         char = prime[-1]
@@ -119,8 +119,8 @@ class Model():
                 sample = weighted_pick(p)
 
             pred = chars[sample]
-            if pred == "\n":
-                return ret
+        #    if pred == "\n":
+        #        return ret
             ret += pred
             char = pred
         return ret

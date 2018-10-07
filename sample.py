@@ -40,7 +40,7 @@ def sample(args):
         if ckpt and ckpt.model_checkpoint_path:
             saver.restore(sess, ckpt.model_checkpoint_path)
             print(model.sample(sess, chars, vocab, args.n, args.prime,
-                               args.sample).encode('utf-8'))
+                               args.sample).encode('utf-8').decode('utf-8'))
 
 if __name__ == '__main__':
     main()

@@ -21,7 +21,6 @@ import random
 import re
 import time
 import uuid
-print("foo")
 
 SITE_URL = os.getenv("SHAMAN_SITEURL", "")
 BOTNAME = os.getenv("SHAMAN_NAME", "shaman")
@@ -47,7 +46,7 @@ def index():
     inp = bottle.request.json.get('text', '')
     inp = inp.replace(BOTNAME,'')
     if inp == "":
-        inp = " "
+        inp = "I "
 
     # get an auth token from the rest api
     auth_token = GetMe(rc.settings).auth_token
@@ -91,18 +90,24 @@ def index():
             }))
 
         # query some content from the RNN
-        saying = sample(inp)\
-            .replace('@', '@-') # don't tag people
+        saying = sample(inp)
+        saying = saying.split("\n")
+        index = random.randint(0, len(saying)-1)
+
+        saying = saying[index]
+
+        # the first line of output includes the input
+        # so we need to trim it
+        if index == 0 and inp != "I ":
+            saying = saying[len(inp)+1:]
+
+        # don't tag people
+        saying = saying.replace('@', '@-') 
 
         # don't say bot's own name, triggering more output
         saying = BOTNAME_NOCASE.sub('', saying)
 
-        # I.. don't really remember what this part is about
-        # except that I think it has to do with empty input
-        # (when someone says only the bot's name)
-        # ...
-        # this is why comments are important
-        saying = saying[len(inp):] if inp == " " else saying[len(inp)+1:]
+        # strip excess whitespace
         saying = saying.strip()
 
         if len(saying) > 0:
