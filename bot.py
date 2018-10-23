@@ -8,6 +8,7 @@ import re
 import sys
 import uuid
 
+
 import tensorflow as tf
 from rocketchat.api import RocketChatAPI
 from rocketchat.calls.auth.get_me import GetMe
@@ -92,24 +93,33 @@ def index():
 
         # query some content from the RNN
         saying = sample(inp)
-        saying = saying.split("\n")
-        idx = random.randint(0, len(saying)-1)
 
-        saying = saying[idx]
+        def heuristics(saying: str) -> str:
+            """Apply rules of thumb to generated text to make it appear more real
+            Also clean the output and do things like prevent it from tagging people
+            """
+            saying = saying.split("\n")
+            idx = random.randint(0, len(saying)-1)
 
-        # the first line of output includes the input
-        # so we need to trim it
-        if idx == 0 and inp != "I ":
-            saying = saying[len(inp)+1:]
+            saying = saying[idx]
 
-        # don't tag people
-        saying = saying.replace('@', '@-')
+            # the first line of output includes the input
+            # so we need to trim it
+            if idx == 0 and inp != "I ":
+                saying = saying[len(inp)+1:]
 
-        # don't say bot's own name, triggering more output
-        saying = BOTNAME_NOCASE.sub('', saying)
+            # don't tag people
+            saying = saying.replace('@', '@-')
 
-        # strip excess whitespace
-        saying = saying.strip()
+            # don't say bot's own name, triggering more output
+            saying = BOTNAME_NOCASE.sub('', saying)
+
+            # strip excess whitespace
+            saying = saying.strip()
+
+            return saying
+
+        saying = heuristics(saying)
 
         if saying != "":
             # say it
