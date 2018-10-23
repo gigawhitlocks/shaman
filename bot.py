@@ -1,31 +1,29 @@
-from __future__ import print_function
-import tensorflow as tf
-
+"""An RNN RocketChat bot -- this file is the entry point
+"""
 import argparse
-import os
-import sys
-from six.moves import cPickle
-
-from model import Model
-
-from six import text_type
-
-from rocketchat.api import RocketChatAPI
-from rocketchat.calls.auth.get_me import GetMe
-from websocket import create_connection
-
-from bottle import post, run, template, request
-import bottle
 import json
+import os
 import random
 import re
-import time
+import sys
 import uuid
+
+import tensorflow as tf
+from rocketchat.api import RocketChatAPI
+from rocketchat.calls.auth.get_me import GetMe
+from six import text_type
+from six.moves import cPickle
+from websocket import create_connection
+
+import bottle
+from bottle import post, run
+from model import Model
 
 SITE_URL = os.getenv("SHAMAN_SITEURL", "")
 BOTNAME = os.getenv("SHAMAN_NAME", "shaman")
 BOTPASSWORD = os.getenv("SHAMAN_PASSWORD", "shaman")
 BOTNAME_NOCASE = re.compile(re.escape(BOTNAME), re.IGNORECASE)
+
 if SITE_URL == "":
     print("Set SHAMAN_SITEURL")
     sys.exit(1)
@@ -34,24 +32,29 @@ if BOTPASSWORD == "":
     sys.exit(1)
 
 print("Connecting to.. {}".format(SITE_URL))
-rc = RocketChatAPI(settings={'username': BOTNAME, 'password': BOTPASSWORD,
-                              'domain': 'https://' + SITE_URL})
-rooms = {}
-for r in rc.get_public_rooms():
-    rooms[r['name']] = r['id']
+RC = RocketChatAPI(settings={'username': BOTNAME, 'password': BOTPASSWORD,
+                             'domain': 'https://' + SITE_URL})
 
-msg = re.compile("\"msg\" : \".*\",\n")
+ROOMS = {}
+for r in RC.get_public_rooms():
+    ROOMS[r['name']] = r['id']
+
 @post('/')
 def index():
+    """Handles incoming pings.
+    Main entrypoint from Rocket Chat.
+    """
+
     inp = bottle.request.json.get('text', '')
-    inp = inp.replace(BOTNAME,'')
+    inp = inp.replace(BOTNAME, '')
     if inp == "":
         inp = "I "
 
     # get an auth token from the rest api
-    auth_token = GetMe(rc.settings).auth_token
+    auth_token = GetMe(RC.settings).auth_token
     url = "wss://" + SITE_URL + "/websocket"
-    ws = create_connection(url)
+
+    ws = create_connection(url) # pylint: invalid-name
     trace = uuid.uuid4().hex[:5]
     # must ping first
     ws.send(json.dumps({
@@ -70,7 +73,7 @@ def index():
         ]
     }))
 
-    channel = bottle.request.json.get('channel_name','')
+    channel = bottle.request.json.get('channel_name', '')
 
     # for some reason the RNN often just returns spaces
     # for some n calls to sample()
@@ -83,7 +86,7 @@ def index():
             "method": "stream-notify-room",
             "id": trace,
             "params": [
-                rooms[channel]+"/typing",
+                ROOMS[channel]+"/typing",
                 BOTNAME,
                 True
                 ]
@@ -92,17 +95,17 @@ def index():
         # query some content from the RNN
         saying = sample(inp)
         saying = saying.split("\n")
-        index = random.randint(0, len(saying)-1)
+        idx = random.randint(0, len(saying)-1)
 
-        saying = saying[index]
+        saying = saying[idx]
 
         # the first line of output includes the input
         # so we need to trim it
-        if index == 0 and inp != "I ":
+        if idx == 0 and inp != "I ":
             saying = saying[len(inp)+1:]
 
         # don't tag people
-        saying = saying.replace('@', '@-') 
+        saying = saying.replace('@', '@-')
 
         # don't say bot's own name, triggering more output
         saying = BOTNAME_NOCASE.sub('', saying)
@@ -110,9 +113,9 @@ def index():
         # strip excess whitespace
         saying = saying.strip()
 
-        if len(saying) > 0:
+        if saying == "":
             # say it
-            rc.send_message(saying, channel)
+            RC.send_message(saying, channel)
 
             # stop typing
             ws.send(json.dumps({
@@ -120,7 +123,7 @@ def index():
                 "method": "stream-notify-room",
                 "id": trace,
                 "params": [
-                    rooms[channel]+"/typing",
+                    ROOMS[channel]+"/typing",
                     "shaman",
                     False
                 ]
@@ -132,7 +135,7 @@ def index():
 
 def main():
     parser = argparse.ArgumentParser(
-                       formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--save_dir', type=str, default='save',
                         help='model directory to store checkpointed models')
     parser.add_argument('-n', type=int, default=500,
@@ -150,10 +153,9 @@ def main():
     run(host='0.0.0.0', port=9001)
 
 def sample(primer):
-    with open(os.path.join(args.save_dir, 'config.pkl'), 'rb') as f:
-        saved_args = cPickle.load(f)
     with open(os.path.join(args.save_dir, 'chars_vocab.pkl'), 'rb') as f:
         chars, vocab = cPickle.load(f)
+
     with tf.Session() as sess:
         tf.global_variables_initializer().run()
         saver = tf.train.Saver(tf.global_variables())
@@ -170,6 +172,7 @@ def sample(primer):
 def init(args):
     with open(os.path.join(args.save_dir, 'config.pkl'), 'rb') as f:
         saved_args = cPickle.load(f)
+
     global model
     model = Model(saved_args, training=False)
 
