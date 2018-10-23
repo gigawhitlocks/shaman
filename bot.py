@@ -35,9 +35,7 @@ print("Connecting to.. {}".format(SITE_URL))
 RC = RocketChatAPI(settings={'username': BOTNAME, 'password': BOTPASSWORD,
                              'domain': 'https://' + SITE_URL})
 
-ROOMS = {}
-for r in RC.get_public_rooms():
-    ROOMS[r['name']] = r['id']
+ROOMS = {r['name']: r['id'] for r in RC.get_public_rooms()}
 
 @post('/')
 def index():
@@ -113,7 +111,7 @@ def index():
         # strip excess whitespace
         saying = saying.strip()
 
-        if saying == "":
+        if saying != "":
             # say it
             RC.send_message(saying, channel)
 
@@ -153,6 +151,8 @@ def main():
     run(host='0.0.0.0', port=9001)
 
 def sample(primer):
+    """Actually samples the RNN. Uses primer as input. Output is a string."""
+
     with open(os.path.join(args.save_dir, 'chars_vocab.pkl'), 'rb') as f:
         chars, vocab = cPickle.load(f)
 
