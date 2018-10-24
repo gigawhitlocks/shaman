@@ -11,10 +11,10 @@ import uuid
 
 import tensorflow as tf
 from rocketchat.api import RocketChatAPI
-from rocketchat.calls.auth.get_me import GetMe
+from rocketchat.calls.auth.get_me import GetMe # this is a brilliant hack
 from six import text_type
 from six.moves import cPickle
-from websocket import create_connection
+from websocket import create_connection, WebSocketException
 
 import bottle
 from bottle import post, run
@@ -39,38 +39,17 @@ RC = RocketChatAPI(settings={'username': BOTNAME, 'password': BOTPASSWORD,
 
 ROOMS = {r['name']: r['id'] for r in RC.get_public_rooms()}
 
-def heuristics(saying: str) -> str:
-    """Apply rules of thumb to generated text to make it appear more real
-    Also clean the output and do things like prevent it from tagging people
-    """
-    saying = saying.split("\n")
-    idx = random.randint(0, len(saying)-1)
-    saying = saying[idx]
-    # don't tag people
-    saying = saying.replace('@', '@-')
-    # don't say bot's own name, triggering more output
-    saying = BOTNAME_NOCASE.sub('', saying)
-    # strip excess whitespace
-    saying = saying.strip()
-    return saying
+ws = None # global rocket chat websocket connection object
 
-@post('/')
-def index():
-    """Handles incoming pings.
-    Main entrypoint from Rocket Chat.
-    """
-
-    inp = bottle.request.json.get('text', '')
-    inp = inp.replace(BOTNAME, '')
-    if inp == "":
-        inp = "I "
-
+# websockets rocket chat login handshake
+def wslogin():
     # get an auth token from the rest api
     auth_token = GetMe(RC.settings).auth_token
     url = "wss://" + SITE_URL + "/websocket"
 
-    ws = create_connection(url)
     trace = uuid.uuid4().hex[:5]
+    global ws
+    ws = create_connection(url)
     # must ping first
     ws.send(json.dumps({
         "msg": "connect",
@@ -88,6 +67,39 @@ def index():
         ]
     }))
 
+def heuristics(saying: str) -> str:
+    """Apply rules of thumb to generated text to make it appear more real
+    Also clean the output and do things like prevent it from tagging people
+    """
+    # choose just one thing to say
+    saying = random.choice(saying.split("\n"))
+
+    # don't tag people
+    saying = saying.replace('@', '@-')
+
+    # don't say bot's own name, triggering more output
+    saying = BOTNAME_NOCASE.sub('', saying)
+
+    # strip excess whitespace
+    saying = saying.strip()
+
+    return saying
+
+@post('/')
+def index():
+    """Handles incoming pings.
+    Main entrypoint from Rocket Chat.
+    """
+
+    inp = bottle.request.json.get('text', '')
+    inp = inp.replace(BOTNAME, '').strip()
+
+    if inp == "":
+        inp = "I "
+
+    if inp == "url":
+        inp = "https://"
+
     channel = bottle.request.json.get('channel_name', '')
 
     # for some reason the RNN often just returns spaces
@@ -96,31 +108,53 @@ def index():
     # at all that is not just whitespace
     while True:
         # send 'shaman is typing...'
-        ws.send(json.dumps({
-            "msg": "method",
-            "method": "stream-notify-room",
-            "id": trace,
-            "params": [
-                ROOMS[channel]+"/typing",
-                BOTNAME,
-                True
-                ]
-            }))
+        trace = uuid.uuid4().hex[:5]
+        try:
+            ws.send(json.dumps({
+                "msg": "method",
+                "method": "stream-notify-room",
+                "id": trace,
+                "params": [
+                    ROOMS[channel]+"/typing",
+                    BOTNAME,
+                    True
+                    ]
+                }))
+        except (WebSocketException, BrokenPipeError) as e:
+
+            print(e)
+            wslogin()
+            ws.send(json.dumps({
+                    "msg": "method",
+                    "method": "stream-notify-room",
+                    "id": trace,
+                    "params": [
+                        ROOMS[channel]+"/typing",
+                        BOTNAME,
+                        True
+                        ]
+                    }))
 
         # query some content from the RNN
         saying = sample(inp)
 
-        # the first line of output includes the input
-        # so we need to trim it
-        if inp != "I ":
+        # special case for url generation
+        if inp == "https://":
+            saying = saying.split("\n")[0]
+
+        elif inp != "I ":         # the first line of output includes the input
+            # so we need to trim it
             saying = saying[len(inp)+1:]
 
         saying = heuristics(saying)
 
+        if saying == "":
+            print("Empty response")
         if saying != "":
             # say it
             RC.send_message(saying, channel)
 
+            trace = uuid.uuid4().hex[:5]
             # stop typing
             ws.send(json.dumps({
                 "msg": "method",
@@ -133,7 +167,7 @@ def index():
                 ]
             }))
 
-            ws.close()
+            # ws.close()
             break
 
 
@@ -171,7 +205,7 @@ def sample(primer):
             return model.sample(sess,
                                 chars,
                                 vocab,
-                                500, primer,
+                                256, primer,
                                 args.sample).encode('utf-8').decode('utf8')
 
 
@@ -181,6 +215,8 @@ def init(args):
 
     global model
     model = Model(saved_args, training=False)
+
+    wslogin()
 
 if __name__ == '__main__':
     main()
