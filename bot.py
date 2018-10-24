@@ -19,6 +19,7 @@ from websocket import create_connection
 import bottle
 from bottle import post, run
 from model import Model
+from typing import List
 
 SITE_URL = os.getenv("SHAMAN_SITEURL", "")
 BOTNAME = os.getenv("SHAMAN_NAME", "shaman")
@@ -38,6 +39,21 @@ RC = RocketChatAPI(settings={'username': BOTNAME, 'password': BOTPASSWORD,
 
 ROOMS = {r['name']: r['id'] for r in RC.get_public_rooms()}
 
+def heuristics(saying: str) -> str:
+    """Apply rules of thumb to generated text to make it appear more real
+    Also clean the output and do things like prevent it from tagging people
+    """
+    saying = saying.split("\n")
+    idx = random.randint(0, len(saying)-1)
+    saying = saying[idx]
+    # don't tag people
+    saying = saying.replace('@', '@-')
+    # don't say bot's own name, triggering more output
+    saying = BOTNAME_NOCASE.sub('', saying)
+    # strip excess whitespace
+    saying = saying.strip()
+    return saying
+
 @post('/')
 def index():
     """Handles incoming pings.
@@ -53,7 +69,7 @@ def index():
     auth_token = GetMe(RC.settings).auth_token
     url = "wss://" + SITE_URL + "/websocket"
 
-    ws = create_connection(url) # pylint: invalid-name
+    ws = create_connection(url)
     trace = uuid.uuid4().hex[:5]
     # must ping first
     ws.send(json.dumps({
@@ -94,30 +110,10 @@ def index():
         # query some content from the RNN
         saying = sample(inp)
 
-        def heuristics(saying: str) -> str:
-            """Apply rules of thumb to generated text to make it appear more real
-            Also clean the output and do things like prevent it from tagging people
-            """
-            saying = saying.split("\n")
-            idx = random.randint(0, len(saying)-1)
-
-            saying = saying[idx]
-
-            # the first line of output includes the input
-            # so we need to trim it
-            if idx == 0 and inp != "I ":
-                saying = saying[len(inp)+1:]
-
-            # don't tag people
-            saying = saying.replace('@', '@-')
-
-            # don't say bot's own name, triggering more output
-            saying = BOTNAME_NOCASE.sub('', saying)
-
-            # strip excess whitespace
-            saying = saying.strip()
-
-            return saying
+        # the first line of output includes the input
+        # so we need to trim it
+        if inp != "I ":
+            saying = saying[len(inp)+1:]
 
         saying = heuristics(saying)
 
