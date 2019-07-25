@@ -9,17 +9,22 @@ import sys
 import uuid
 
 
+
 import tensorflow as tf
 from rocketchat.api import RocketChatAPI
 from rocketchat.calls.auth.get_me import GetMe # this is a brilliant hack
 from six import text_type
 from six.moves import cPickle
+from ssl import SSLError
 from websocket import create_connection, WebSocketException
 
 import bottle
 from bottle import post, run
 from model import Model
 from typing import List
+
+import requests
+import urllib3
 
 SITE_URL = os.getenv("SHAMAN_SITEURL", "")
 BOTNAME = os.getenv("SHAMAN_NAME", "shaman")
@@ -120,7 +125,7 @@ def index():
                     True
                     ]
                 }))
-        except (WebSocketException, BrokenPipeError) as e:
+        except (SSLError, WebSocketException, BrokenPipeError) as e:
 
             print(e)
             wslogin()
@@ -140,7 +145,26 @@ def index():
 
         # special case for url generation
         if inp == "https://":
-            saying = saying.split("\n")[0]
+            while True:
+                saying = saying.split("\n")[0]
+                print(saying)
+                try:
+                    r = requests.get(saying, timeout=.1)
+                    break
+                except requests.exceptions.ConnectionError:
+                    break
+
+                except (urllib3.exceptions.RequestError,
+                        requests.exceptions.RequestException,
+                        UnicodeError, ValueError):
+
+                    if channel == "shaman":
+                        RC.send_message(saying, channel)
+
+                    saying = sample(inp)
+                    continue
+
+
 
         elif inp != "I ":         # the first line of output includes the input
             # so we need to trim it
@@ -150,6 +174,7 @@ def index():
 
         if saying == "":
             print("Empty response")
+
         if saying != "":
             # say it
             RC.send_message(saying, channel)
@@ -188,7 +213,7 @@ def main():
     args = parser.parse_args()
 
     init(args)
-    run(host='0.0.0.0', port=9001)
+    run(host='0.0.0.0', port=9871)
 
 def sample(primer):
     """Actually samples the RNN. Uses primer as input. Output is a string."""
