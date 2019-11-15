@@ -11,8 +11,6 @@ import uuid
 
 
 import tensorflow as tf
-from rocketchat.api import RocketChatAPI
-from rocketchat.calls.auth.get_me import GetMe # this is a brilliant hack
 from six import text_type
 from six.moves import cPickle
 from ssl import SSLError
@@ -28,49 +26,36 @@ import urllib3
 
 SITE_URL = os.getenv("SHAMAN_SITEURL", "")
 BOTNAME = os.getenv("SHAMAN_NAME", "shaman")
-BOTPASSWORD = os.getenv("SHAMAN_PASSWORD", "shaman")
+TOKEN = os.getenv("SHAMAN_PASSWORD", "shaman")
 BOTNAME_NOCASE = re.compile(re.escape(BOTNAME), re.IGNORECASE)
+
+from mattermostdriver import Driver
 
 if SITE_URL == "":
     print("Set SHAMAN_SITEURL")
     sys.exit(1)
-if BOTPASSWORD == "":
+if TOKEN == "":
     print("Set SHAMAN_PASSWORD")
     sys.exit(1)
 
 print("Connecting to.. {}".format(SITE_URL))
-RC = RocketChatAPI(settings={'username': BOTNAME, 'password': BOTPASSWORD,
-                             'domain': 'https://' + SITE_URL})
+mm = Driver({
+    'url': SITE_URL,
+    'token': TOKEN,
+    'scheme': 'https',
+    'port': 443,
+    'verify': True})
 
-ROOMS = {r['name']: r['id'] for r in RC.get_public_rooms()}
+mm.login()
 
-ws = None # global rocket chat websocket connection object
+# connect to the API
+# TODO reimplement for MM
 
-# websockets rocket chat login handshake
-def wslogin():
-    # get an auth token from the rest api
-    auth_token = GetMe(RC.settings).auth_token
-    url = "wss://" + SITE_URL + "/websocket"
+# get room names to id? maybe not necessary for MM
+# TODO reimplement for MM
+# old implementation:
+# ROOMS = {r['name']: r['id'] for r in RC.get_public_rooms()}
 
-    trace = uuid.uuid4().hex[:5]
-    global ws
-    ws = create_connection(url)
-    # must ping first
-    ws.send(json.dumps({
-        "msg": "connect",
-        "version": "1",
-        "support": ["1"]
-    }))
-
-    # login
-    ws.send(json.dumps({
-        "msg": "method",
-        "method": "login",
-        "id": trace,
-        "params": [
-            {"resume": auth_token}
-        ]
-    }))
 
 def heuristics(saying: str) -> str:
     """Apply rules of thumb to generated text to make it appear more real
@@ -93,19 +78,15 @@ def heuristics(saying: str) -> str:
 @post('/')
 def index():
     """Handles incoming pings.
-    Main entrypoint from Rocket Chat.
     """
-
+    print(bottle.request.json)
     inp = bottle.request.json.get('text', '')
     inp = inp.replace(BOTNAME, '').strip()
 
     if inp == "":
         inp = "I "
 
-    if inp == "url":
-        inp = "https://"
-
-    channel = bottle.request.json.get('channel_name', '')
+    channel = bottle.request.json.get('channel_id', '')
 
     # for some reason the RNN often just returns spaces
     # for some n calls to sample()
@@ -113,61 +94,15 @@ def index():
     # at all that is not just whitespace
     while True:
         # send 'shaman is typing...'
-        trace = uuid.uuid4().hex[:5]
-        try:
-            ws.send(json.dumps({
-                "msg": "method",
-                "method": "stream-notify-room",
-                "id": trace,
-                "params": [
-                    ROOMS[channel]+"/typing",
-                    BOTNAME,
-                    True
-                    ]
-                }))
-        except (SSLError, WebSocketException, BrokenPipeError) as e:
-
-            print(e)
-            wslogin()
-            ws.send(json.dumps({
-                    "msg": "method",
-                    "method": "stream-notify-room",
-                    "id": trace,
-                    "params": [
-                        ROOMS[channel]+"/typing",
-                        BOTNAME,
-                        True
-                        ]
-                    }))
+        # TODO reimplement for MM
 
         # query some content from the RNN
         saying = sample(inp)
 
-        # special case for url generation
-        if inp == "https://":
-            while True:
-                saying = saying.split("\n")[0]
-                print(saying)
-                try:
-                    r = requests.get(saying, timeout=.1)
-                    break
-                except requests.exceptions.ConnectionError:
-                    break
-
-                except (urllib3.exceptions.RequestError,
-                        requests.exceptions.RequestException,
-                        UnicodeError, ValueError):
-
-                    if channel == "shaman":
-                        RC.send_message(saying, channel)
-
-                    saying = sample(inp)
-                    continue
-
-
-
-        elif inp != "I ":         # the first line of output includes the input
-            # so we need to trim it
+        if inp != "I ":
+            # the first line of output includes the input
+            # so we need to trim it unless we're
+            # prompting shaman to speak in the first person I guess
             saying = saying[len(inp)+1:]
 
         saying = heuristics(saying)
@@ -176,24 +111,13 @@ def index():
             print("Empty response")
 
         if saying != "":
-            # say it
-            RC.send_message(saying, channel)
-
-            trace = uuid.uuid4().hex[:5]
-            # stop typing
-            ws.send(json.dumps({
-                "msg": "method",
-                "method": "stream-notify-room",
-                "id": trace,
-                "params": [
-                    ROOMS[channel]+"/typing",
-                    "shaman",
-                    False
-                ]
-            }))
-
-            # ws.close()
+            # TODO implement sending the saying
             break
+
+    mm.posts.create_post(options={
+        'channel_id': channel,
+        'message': saying
+    })
 
 
 def main():
@@ -241,7 +165,6 @@ def init(args):
     global model
     model = Model(saved_args, training=False)
 
-    wslogin()
 
 if __name__ == '__main__':
     main()
